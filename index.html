@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pantry Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen">
+
+    <div class="max-w-4xl mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="mb-8 text-center sm:text-left">
+            <h1 class="text-3xl font-bold text-slate-900 tracking-tight">Digital Pantry</h1>
+            <p class="text-slate-500 mt-1">Track your ingredients and minimize food waste.</p>
+        </header>
+
+        <!-- Status Toast Notifications -->
+        <div id="toast" class="hidden fixed bottom-5 right-5 px-5 py-3 rounded-lg shadow-lg text-white font-medium transition-all duration-300 transform translate-y-2 opacity-0 z-50"></div>
+
+        <!-- Add Item Form Section -->
+        <section class="bg-white p-6 rounded-xl shadow-xs border border-slate-200/80 mb-8">
+            <h2 class="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                <span>➕</span> Add New Food Item
+            </h2>
+            <form id="pantry-form" class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                <!-- Item Name -->
+                <div>
+                    <label for="item-name" class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Food Name</label>
+                    <input type="text" id="item-name" required placeholder="e.g., Milk, Spinach, Eggs" 
+                        class="w-full px-4 py-2.5 rounded-lg border border-slate-300 bg-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+                </div>
+
+                <!-- Expiration Date -->
+                <div>
+                    <label for="expiration-date" class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Expiration Date</label>
+                    <input type="date" id="expiration-date" required 
+                        class="w-full px-4 py-2.5 rounded-lg border border-slate-300 bg-white text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+                </div>
+
+                <!-- Submit Button -->
+                <div>
+                    <button type="submit" 
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-lg cursor-pointer transition-colors shadow-xs shadow-blue-500/20 active:scale-[0.98]">
+                        Add to Pantry
+                    </button>
+                </div>
+            </form>
+        </section>
+
+        <!-- Pantry Items Display Table -->
+        <section class="bg-white rounded-xl shadow-xs border border-slate-200/80 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/70 flex justify-between items-center">
+                <h2 class="text-lg font-semibold text-slate-900">Current Inventory</h2>
+                <span id="item-count" class="bg-slate-200 text-slate-700 px-2.5 py-0.5 rounded-full text-xs font-bold">0 Items</span>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-slate-200 bg-slate-50/50">
+                            <th class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-400">Item Name</th>
+                            <th class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-400">Expiration Date</th>
+                            <th class="px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-400 text-right">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pantry-table-body" class="divide-y divide-slate-100">
+                        <!-- Dynamic items get injected here -->
+                        <tr id="loading-row">
+                            <td colspan="3" class="px-6 py-12 text-center text-slate-400 italic">
+                                Loading your pantry inventory...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <!-- Frontend Logic -->
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        const form = document.getElementById('pantry-form');
+        const tableBody = document.getElementById('pantry-table-body');
+        const itemCountBadge = document.getElementById('item-count');
+
+        // Helper: Show transient notifications
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `fixed bottom-5 right-5 px-5 py-3 rounded-lg shadow-lg text-white font-medium z-50 transition-all duration-300 ${isError ? 'bg-red-500' : 'bg-emerald-500'}`;
+            
+            // Fade in
+            toast.classList.remove('hidden', 'translate-y-2', 'opacity-0');
+            
+            // Hide after 3 seconds
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.classList.add('hidden'), 300);
+            }, 3000);
+        }
+
+        // Helper: Format date strings beautifully
+        function formatDate(dateString) {
+            if (!dateString) return 'N/A';
+            const options = { year: 'numeric', month: 'short', day: 'numeric' };
+            return new Date(dateString).toLocaleDateString(undefined, options);
+        }
+
+        // Helper: Visual urgency badges based on current date
+        function getStatusBadge(dateString) {
+            if (!dateString) return '';
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const expiry = new Date(dateString);
+            expiry.setHours(0,0,0,0);
+            
+            const diffTime = expiry - today;
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            if (diffDays < 0) {
+                return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Expired</span>`;
+            } else if (diffDays <= 3) {
+                return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Use Soon</span>`;
+            } else {
+                return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Fresh</span>`;
+            }
+        }
+
+        // Action: Fetch sorted items from FastAPI
+        async function loadPantryItems() {
+            try {
+                const response = await fetch(`${API_BASE}/items/sorted`);
+                if (!response.ok) throw new Error('Failed to retrieve inventory data.');
+                
+                const items = await response.json();
+                tableBody.innerHTML = ''; // Wipe out existing rows
+                itemCountBadge.textContent = `${items.length} Item${items.length === 1 ? '' : 's'}`;
+
+                if (items.length === 0) {
+                    tableBody.innerHTML = `
+                        <tr>
+                            <td colspan="3" class="px-6 py-12 text-center text-slate-400 bg-slate-50/30">
+                                Your pantry is currently empty. Add an item above!
+                            </td>
+                        </tr>`;
+                    return;
+                }
+
+                items.forEach(item => {
+                    const row = document.createElement('tr');
+            
+                    // Calculate days remaining
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0); // Reset time to match date-only comparison
+                    const expiry = new Date(item.expiry_date);
+                    expiry.setHours(0, 0, 0, 0);
+            
+                    const timeDiff = expiry.getTime() - today.getTime();
+                    const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
+            
+                    // Day 5 Styling: Flash warning colors if expiring soon or expired!
+                    let rowStyle = 'hover:bg-slate-50/80 transition-colors';
+                    let statusBadge = '<span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Fresh</span>';
+            
+                    if (daysLeft < 0) {
+                        rowStyle = 'bg-red-50 hover:bg-red-100/80 transition-colors';
+                        statusBadge = '<span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Expired</span>';
+                    } else if (daysLeft <= 2) {
+                        rowStyle = 'bg-amber-50 hover:bg-amber-100/80 transition-colors';
+                        statusBadge = `<span class="px-2 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">${daysLeft} days left</span>`;
+                    }
+            
+                    row.className = rowStyle;
+            
+                    row.innerHTML = `
+                        <td class="px-6 py-4 font-medium text-slate-900">${item.name}</td>
+                        <td class="px-6 py-4 text-slate-500">${formatDate(item.expiry_date)}</td>
+                        <td class="px-6 py-4">${statusBadge}</td>
+                    `;
+            
+                    const actionTd = document.createElement('td');
+                    actionTd.className = 'px-6 py-4 text-right';
+            
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'text-red-600 hover:text-red-900 font-medium cursor-pointer';
+                    deleteBtn.innerHTML = '🗑️ Delete';
+            
+                    deleteBtn.addEventListener('click', () => deleteItem(item.id));
+            
+                    actionTd.appendChild(deleteBtn);
+                    row.appendChild(actionTd);
+                    tableBody.appendChild(row);
+                });
+            } catch (error) {
+                console.error(error);
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="3" class="px-6 py-8 text-center text-red-500 bg-red-50/50 font-medium">
+                            ⚠️ Error connecting to API: ${error.message}
+                        </td>
+                    </tr>`;
+            }
+        }
+        
+        async function deleteItem(id) {
+            if (!confirm("Did you finish or throw away this item?")) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/items/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showToast("Item removed from pantry!");
+                    loadPantryItems(); // Refresh the list instantly!
+                } else {
+                    const err = await response.json();
+                    showToast(err.detail || "Failed to delete item", true);
+                }
+            } catch (error) {
+                showToast("Error connecting to server", true);
+            }
+        }
+
+        // Action: Intercept Form Submit & POST to FastAPI
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const nameInput = document.getElementById('item-name');
+            const dateInput = document.getElementById('expiration-date');
+
+            // Construct standard JSON payload matching Pydantic models
+            const payload = {
+                name: nameInput.value.trim(),
+                expiry_date: dateInput.value
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/items`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                const errData = await response.json().catch(() => ({ detail: 'Unknown error occurred' }));
+                // FIX 1: Explicitly pass the error string text so it doesn't break
+                const msg = typeof errData.detail === 'string' ? errData.detail : JSON.stringify(errData.detail);
+                throw new Error(msg || 'Could not save item.');
+            }
+
+            showToast(`Successfully added "${payload.name}"!`);
+            form.reset();
+            loadPantryItems(); // Refresh inventory dynamically
+        } catch (error) {
+            // FIX 2: Ensure it grabs the clean string message text
+            showToast(error.message || 'An error occurred', true);
+        }
+        });
+
+        // Initialize table payload on viewport ready
+        document.addEventListener('DOMContentLoaded', loadPantryItems);
+    </script>
+</body>
+</html>
